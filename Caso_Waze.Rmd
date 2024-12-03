@@ -1,0 +1,44 @@
+---
+title: "Análisis de las variables regionalizadas para el cultivo del Aguacate (*Persea americana*)"
+subtitle: |
+  | Pontificia Universidad Javeriana
+  | Maestría en Ciencia de Datos
+  | Análisis de Información Geográfica y Espacial
+author: "Christian Bermúdez Rivas"
+date: "2024-11-22"
+bibliography: biblio.bib
+output: 
+  html_document:
+    fig_caption: true
+    toc: true
+    toc_depth: 3
+    toc_float: 
+        collapsed: true
+        smooth_scroll: false
+    number_sections: true
+    theme: default
+    code_folding: hide
+---
+
+# Introducción
+
+# Problema
+
+# Entendimiento de los datos
+
+```{r carga_datos, echo=TRUE, message=FALSE, warning=FALSE}
+require(readxl)
+data<-readxl::read_excel("Trama_Waze.xlsx")
+
+```
+
+
+# Transformación de los datos
+
+```{r transformacion_datos, echo=TRUE, message=FALSE, warning=FALSE}
+
+data$lat <- data$location_y / 10^(nchar(data$location_y) - 1)
+data$long <- data$location_x / 10^(nchar(data$location_x) - 3)
+
+```
+
