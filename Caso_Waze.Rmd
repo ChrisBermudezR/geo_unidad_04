@@ -1,12 +1,11 @@
 ---
-title: "Análisis de las variables regionalizadas para el cultivo del Aguacate (*Persea americana*)"
+title: "Análisis transporte Cali"
 subtitle: |
   | Pontificia Universidad Javeriana
   | Maestría en Ciencia de Datos
   | Análisis de Información Geográfica y Espacial
 author: "Christian Bermúdez Rivas"
 date: "2024-11-22"
-bibliography: biblio.bib
 output: 
   html_document:
     fig_caption: true
@@ -26,10 +25,42 @@ output:
 
 # Entendimiento de los datos
 
+```{r paquetes, echo=TRUE, message=FALSE, warning=FALSE}
+require(readxl)
+require(dplyr)
+require(lubridate)
+require(leaflet)
+require(sf)
+require(mapview)
+require(spatstat)
+require(terra)
+require(leaflet.extras)
+require(ggplot2)
+require(leafsync)
+
+```
+
 ```{r carga_datos, echo=TRUE, message=FALSE, warning=FALSE}
 require(readxl)
 data<-readxl::read_excel("Trama_Waze.xlsx")
 
+
+# Cambiar los nombres de los tipos de eventos a español
+data$tipo_evento <- recode(data$type,
+                                 "ACCIDENT" = "ACCIDENTE",
+                                 "HAZARD" = "PELIGRO",
+                                 "JAM" = "CONGESTIÓN",
+                                 "ROAD_CLOSED" = "VÍA CERRADA")
+# Convertir la fecha y extraer la hora y el día
+fecha_hora = ymd_hms(data$creation_Date)
+hora = hour(fecha_hora)
+dia = day(fecha_hora)
+
+# Agregar la columna de hora a los datos
+data$hora = hora
+
+# Mostrar la tabla de frecuencia de tipos de eventos
+table(data$tipo_evento)
 ```
 
 
@@ -39,6 +70,174 @@ data<-readxl::read_excel("Trama_Waze.xlsx")
 
 data$lat <- data$location_y / 10^(nchar(data$location_y) - 1)
 data$long <- data$location_x / 10^(nchar(data$location_x) - 3)
+# Convertir la columna de fechas a formato adecuado
+data$fecha = as.Date(data$creation_Date, format ="%Y-%m-%d %H:%M")
 
 ```
 
+# Distribución de eventos
+
+```{r eventos, echo=TRUE, message=FALSE, warning=FALSE}
+
+# Calcular la frecuencia de cada tipo de evento en Trama_Waze
+frecuencia_eventos <- data %>%
+  group_by(tipo_evento) %>%                 # Agrupar por tipo de evento
+  summarise(Frecuencia = n()) %>%     # Contar la frecuencia de cada tipo
+  arrange(desc(Frecuencia))           # Ordenar por frecuencia descendente
+
+palette <- c("#FF5733", "#FFC300", "#1F77FF", "#28A745")
+
+# Crear un gráfico de barras con ggplot2 usando los datos de Trama_Waze
+ggplot(frecuencia_eventos, aes(x = tipo_evento, y = Frecuencia, fill = tipo_evento)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Distribución de Tipos de Eventos en Trama Waze", 
+       x = "Tipo de Evento", y = "Frecuencia") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotar etiquetas para mejor visualización
+  scale_fill_brewer(palette = "Set1")  # Utilizar una paleta de colores predefinida
+```
+
+## Peligro
+
+```{r filtrado_peligro, echo=TRUE, message=FALSE, warning=FALSE}
+# Identificar eventos PELIGRO del día 26
+pos <- which(data$tipo_evento == "PELIGRO" & dia == 26)
+peligro26 <- data[pos,]
+```
+
+
+
+```{r mapa_peligro, echo=TRUE, message=FALSE, warning=FALSE}
+# Ajustar las coordenadas de latitud y longitud
+peligro26$lat <- peligro26$location_y / 10^(nchar(peligro26$location_y) - 1)
+peligro26$long <- peligro26$location_x / 10^(nchar(peligro26$location_x) - 3)
+
+# Filtrar eventos dentro del rango geográfico adecuado
+peligro26 <- peligro26[peligro26$lat > 4 & peligro26$lat < 5,]
+
+# Crear un mapa interactivo con leaflet
+m26_peligro <- leaflet() %>%
+  addTiles('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}') %>%
+  addCircleMarkers(lng = peligro26$long, lat = peligro26$lat,
+                   clusterOptions = markerClusterOptions(),
+                   label = peligro26$hora) %>%
+  addControl(html = "<h3>Mapa de Riesgos</h3>", position = "topleft")
+
+# Mostrar el mapa
+m26_peligro
+```
+```{r filtrado_peligro2, echo=TRUE, message=FALSE, warning=FALSE}
+# Filtrar datos relevantes de peligro26
+peligro26 <- peligro26 %>%
+  filter(lat > 4 & lat < 5, long > -75 & long < -73)  # Ajustar las coordenadas de interés
+
+# Crear un mapa interactivo con leaflet y addHeatmap
+leaflet(peligro26) %>%
+  addTiles('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}') %>%  # Añadir la capa base del mapa
+  addHeatmap(
+    lng = ~long, lat = ~lat,               # Especificar las columnas de longitud y latitud
+    intensity = ~hora,                     # Intensidad opcional basada en la hora (o cualquier otra variable)
+    blur = 20,                             # Nivel de desenfoque del mapa de calor
+    max = 0.08,                            # Ajustar el valor máximo para la intensidad
+    radius = 15                            # Radio de cada punto en el mapa de calor
+  ) %>%
+  addLegend("bottomright",                 # Añadir leyenda
+            title = "Mapa de Calor de Riesgos",
+            colors = c("blue", "green", "yellow", "red"),
+            labels = c("Bajo", "Moderado", "Alto", "Muy Alto"))
+```
+
+
+# Cierre de vías
+
+```{r filtrado_vias, echo=TRUE, message=FALSE, warning=FALSE}
+# Identificar eventos PELIGRO del día 26
+pos <- which(data$tipo_evento == "VÍA CERRADA" & dia == 26)
+via_cerrada_26 <- data[pos,]
+
+# Ajustar las coordenadas de latitud y longitud
+via_cerrada_26$lat <- via_cerrada_26$location_y / 10^(nchar(via_cerrada_26$location_y) - 1)
+via_cerrada_26$long <- via_cerrada_26$location_x / 10^(nchar(via_cerrada_26$location_x) - 3)
+
+# Filtrar eventos dentro del rango geográfico adecuado
+via_cerrada_26 <- via_cerrada_26[via_cerrada_26$lat > 4 & via_cerrada_26$lat < 5,]
+```
+
+
+```{r mapas_vias, echo=TRUE, message=FALSE, warning=FALSE}
+
+
+# Crear el mapa interactivo
+m26_via_cerrada = leaflet(via_cerrada_26) %>%
+  addTiles('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}') %>%
+  addCircleMarkers(lng = ~long, lat = ~lat,
+                   clusterOptions = markerClusterOptions(),
+                   label = ~hora) %>%
+  addControl(html = "<h3>Mapa de Cierre de Vías<h3>", position = "topleft")
+
+# Mostrar el mapa interactivo
+m26_via_cerrada
+```
+
+```{r analisis_espacial, echo=TRUE, message=FALSE, warning=FALSE}
+# Definir la zona de interés
+zona <- spatstat.geom::owin(xrange = c(-74.04331, -73.9929), yrange = c(4.885736, 4.948562))
+
+# Crear un patrón de puntos espaciales a partir de los eventos VÍA CERRADA
+patron_via_cerrada <- spatstat.geom::ppp(x = via_cerrada_26$long, y = via_cerrada_26$lat, window = zona)
+
+# Graficar el test de cuadrantes
+plot(spatstat.geom::quadratcount(patron_via_cerrada), main = "Patrón de Puntos y Test de Cuadrantes")
+
+# Superponer los puntos sobre los cuadrantes
+points(patron_via_cerrada, col = "red")
+```
+
+
+```{r kestimacion_vias, echo=TRUE, message=FALSE, warning=FALSE}
+# Gráfico independiente: Función K-Estimación
+
+plot(spatstat.explore::Kest(patron_via_cerrada), main = "Función K-Estimación")
+```
+
+
+## Mapa de Densidad de Cierres de Vías
+
+
+
+```{r mapa_vias, echo=TRUE, message=FALSE, warning=FALSE}
+
+# Asegurarse de que el objeto patron_via_cerrada esté correctamente definido
+# Crear un patrón de puntos espaciales utilizando los datos correctos (via_cerrada_26)
+zona <- spatstat.geom::owin(xrange = c(-74.04331, -73.9929), yrange = c(4.885736, 4.948562))
+patron_via_cerrada <- spatstat.geom::ppp(x = via_cerrada_26$long, y = via_cerrada_26$lat, window = zona)
+
+# Calcular la densidad espacial
+im1 <- density(patron_via_cerrada, sigma = 0.01)  # Ajusta sigma según sea necesario
+
+# Convertir la densidad a un objeto raster usando terra
+mapa_via_cerrada <- rast(im1)
+
+# Convertir el raster a data.frame para leaflet
+df_via_cerrada <- as.data.frame(mapa_via_cerrada, xy = TRUE)
+colnames(df_via_cerrada) <- c("long", "lat", "intensity")
+
+# Normalizar los valores de intensidad entre 0 y 1
+df_via_cerrada$intensity <- (df_via_cerrada$intensity - min(df_via_cerrada$intensity)) / 
+                            (max(df_via_cerrada$intensity) - min(df_via_cerrada$intensity))
+
+# Crear un mapa interactivo usando leaflet
+leaflet(df_via_cerrada) %>%
+  addTiles('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}') %>%  # Añadir la capa base
+  addHeatmap(
+    lng = ~long, lat = ~lat,              # Coordenadas de longitud y latitud
+    intensity = ~intensity,               # Intensidad normalizada
+    blur = 20,                            # Nivel de desenfoque
+    max = 1,                              # Valor máximo de la intensidad normalizada
+    radius = 15                           # Radio para reflejar la densidad
+  ) %>%
+  addLegend("bottomright",                # Añadir la leyenda
+            title = "Mapa de Calor de Cierres de Vías",
+            colors = c("blue", "green", "yellow", "red"),
+            labels = c("Bajo", "Moderado", "Alto", "Muy Alto"))
+```
